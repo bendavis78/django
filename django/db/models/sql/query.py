@@ -490,13 +490,13 @@ class Query(object):
         # Now, add the joins from rhs query into the new query (skipping base
         # table).
         for alias in rhs.tables[1:]:
-            table, _, join_type, lhs, join_cols, nullable, join_field = rhs.alias_map[alias]
+            table, _, join_type, lhs, join_cols, nullable, join_field, m2m = rhs.alias_map[alias]
             # If the left side of the join was already relabeled, use the
             # updated alias.
             lhs = change_map.get(lhs, lhs)
             new_alias = self.join(
                 (lhs, table, join_cols), reuse=reuse,
-                nullable=nullable, join_field=join_field)
+                nullable=nullable, join_field=join_field, m2m=m2m)
             if join_type == self.INNER:
                 rhs_votes.add(new_alias)
             # We can't reuse the same join again in the query. If we have two
@@ -858,7 +858,8 @@ class Query(object):
         """
         return len([1 for count in self.alias_refcount.values() if count])
 
-    def join(self, connection, reuse=None, nullable=False, join_field=None):
+    def join(self, connection, reuse=None, nullable=False, join_field=None,
+             m2m=False):
         """
         Returns an alias for the join in 'connection', either reusing an
         existing alias for that join or creating a new one. 'connection' is a
@@ -910,7 +911,7 @@ class Query(object):
         else:
             join_type = self.INNER
         join = JoinInfo(table, alias, join_type, lhs, join_cols or ((None, None),), nullable,
-                        join_field)
+                        join_field, m2m)
         self.alias_map[alias] = join
         if connection in self.join_map:
             self.join_map[connection] += (alias,)
@@ -1008,6 +1009,20 @@ class Query(object):
 
             # Join promotion note - we must not remove any rows here, so use
             # outer join if there isn't any existing join.
+
+            # If the aggregate requires distinct values, and we have more than
+            # one multijoin, we need to set up a derived join to avoid
+            # aggregation errors.
+
+            # unique list of aliases that include multijoins used by aggregates
+            aggregate_multijoins = set(
+                a.col[0] for a in self.aggregates.values()
+                if self.alias_map[a.col[0]].m2m)
+
+            # see if current aggregate will result in multijoin
+            #if len(aggregate_multijoins) > 1:
+            #    raise Exception("aggregate multijoin error")
+
             field, sources, opts, join_list, path = self.setup_joins(
                 field_list, opts, self.get_initial_alias())
 
@@ -1427,7 +1442,8 @@ class Query(object):
             connection = alias, opts.db_table, join.join_field.get_joining_columns()
             reuse = can_reuse if join.m2m else None
             alias = self.join(
-                connection, reuse=reuse, nullable=nullable, join_field=join.join_field)
+                connection, reuse=reuse, nullable=nullable,
+                join_field=join.join_field, m2m=join.m2m)
             joins.append(alias)
         return final_field, targets, opts, joins, path
 

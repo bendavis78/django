@@ -17,6 +17,7 @@ class Aggregate(RegisterLookupMixin):
     """
     is_ordinal = False
     is_computed = False
+    distinct_multijoin = False
     sql_template = '%(function)s(%(field)s)'
 
     def __init__(self, col, source=None, is_summary=False, **extra):
@@ -42,7 +43,9 @@ class Aggregate(RegisterLookupMixin):
          * is_computed, a boolean indicating if this output of this aggregate
            is a computed float (e.g., an average), regardless of the input
            type.
-
+         * multijoin_distinct, a boolean indicating that this aggregate
+           requires distinct rows when a query using distinct() contains more
+           than one multijoin (see ticket #10060).
         """
         self.col = col
         self.source = source
@@ -139,6 +142,7 @@ class StdDev(Aggregate):
 
 class Sum(Aggregate):
     sql_function = 'SUM'
+    distinct_multijoin = True
 
 
 class Variance(Aggregate):

@@ -418,10 +418,29 @@ class AggregationTests(TestCase):
             {'max_authors': None, 'max_rating': None, 'num_authors': 0, 'avg_authors': None, 'max_price': None}
         )
 
-        qs = Publisher.objects.filter(pk=5).annotate(num_authors=Count('book__authors'), avg_authors=Avg('book__authors'), max_authors=Max('book__authors'), max_price=Max('book__price'), max_rating=Max('book__rating')).values()
+        # TODO: This fails under the fix for #10060
+        # book is a many-to-one rel
+        # book__authors is another many-to-one rel
+        #
+        # Also, Max/Min should be allowed, since their resulting values would not be
+        # subject to this bug.
+        qs = Publisher.objects.filter(pk=5).annotate(
+            num_authors=Count('book__authors'),
+            avg_authors=Avg('book__authors'),
+            max_authors=Max('book__authors'),
+            max_price=Max('book__price'),
+            max_rating=Max('book__rating')).values()
+
         self.assertQuerysetEqual(
             qs, [
-                {'max_authors': None, 'name': "Jonno's House of Books", 'num_awards': 0, 'max_price': None, 'num_authors': 0, 'max_rating': None, 'id': 5, 'avg_authors': None}
+                {'max_authors': None,
+                 'name': "Jonno's House of Books",
+                 'num_awards': 0,
+                 'max_price': None,
+                 'num_authors': 0,
+                 'max_rating': None,
+                 'id': 5,
+                 'avg_authors': None}
             ],
             lambda p: p
         )

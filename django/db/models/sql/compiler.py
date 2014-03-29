@@ -513,7 +513,7 @@ class SQLCompiler(object):
             if not self.query.alias_refcount[alias]:
                 continue
             try:
-                name, alias, join_type, lhs, join_cols, _, join_field = self.query.alias_map[alias]
+                name, alias, join_type, lhs, join_cols, _, join_field, _ = self.query.alias_map[alias]
             except KeyError:
                 # Extra tables can end up in self.tables, but not in the
                 # alias_map if they aren't in a join. That's OK. We skip them.

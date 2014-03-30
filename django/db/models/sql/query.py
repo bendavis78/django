@@ -1010,21 +1010,22 @@ class Query(object):
             # Join promotion note - we must not remove any rows here, so use
             # outer join if there isn't any existing join.
 
+            field, sources, opts, join_list, path = self.setup_joins(
+                field_list, opts, self.get_initial_alias())
+
             # If the aggregate requires distinct values, and we have more than
             # one multijoin, we need to set up a derived join to avoid
             # aggregation errors.
 
-            # unique list of aliases that include multijoins used by aggregates
-            aggregate_multijoins = set(
-                a.col[0] for a in self.aggregates.values()
-                if self.alias_map[a.col[0]].m2m)
+            # unique list of aliases that use multijoins
+            multijoins = set(a for a, j in self.alias_map.iteritems() if j.m2m)
 
-            # see if current aggregate will result in multijoin
-            #if len(aggregate_multijoins) > 1:
-            #    raise Exception("aggregate multijoin error")
-
-            field, sources, opts, join_list, path = self.setup_joins(
-                field_list, opts, self.get_initial_alias())
+            sql_class = getattr(self.aggregates_module, aggregate.name)
+            if len(multijoins) > 1 and sql_class.join_distinct:
+                msg = ("{0.name}({0.lookup}) requires distinct rows, and "
+                       "cannot be used on a queryset with more than "
+                       "one multi-join.")
+                raise ValueError(msg.format(aggregate))
 
             # Process the join chain to see if it can be trimmed
             targets, _, join_list = self.trim_joins(sources, join_list, path)

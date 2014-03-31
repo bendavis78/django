@@ -490,13 +490,13 @@ class Query(object):
         # Now, add the joins from rhs query into the new query (skipping base
         # table).
         for alias in rhs.tables[1:]:
-            table, _, join_type, lhs, join_cols, nullable, join_field, m2m = rhs.alias_map[alias]
+            table, _, join_type, lhs, join_cols, nullable, join_field, m2n = rhs.alias_map[alias]
             # If the left side of the join was already relabeled, use the
             # updated alias.
             lhs = change_map.get(lhs, lhs)
             new_alias = self.join(
                 (lhs, table, join_cols), reuse=reuse,
-                nullable=nullable, join_field=join_field, m2m=m2m)
+                nullable=nullable, join_field=join_field, m2n=m2n)
             if join_type == self.INNER:
                 rhs_votes.add(new_alias)
             # We can't reuse the same join again in the query. If we have two
@@ -859,7 +859,7 @@ class Query(object):
         return len([1 for count in self.alias_refcount.values() if count])
 
     def join(self, connection, reuse=None, nullable=False, join_field=None,
-             m2m=False):
+             m2n=False):
         """
         Returns an alias for the join in 'connection', either reusing an
         existing alias for that join or creating a new one. 'connection' is a
@@ -882,6 +882,9 @@ class Query(object):
         is a candidate for promotion (to "left outer") when combining querysets.
 
         The 'join_field' is the field we are joining along (if any).
+
+        If 'm2n' is True, it implies that the join might introduce multiple
+        values per result (in the case of a m2m or m2o relationship).
         """
         lhs, table, join_cols = connection
         assert lhs is None or join_field is not None
@@ -911,7 +914,7 @@ class Query(object):
         else:
             join_type = self.INNER
         join = JoinInfo(table, alias, join_type, lhs, join_cols or ((None, None),), nullable,
-                        join_field, m2m)
+                        join_field, m2n)
         self.alias_map[alias] = join
         if connection in self.join_map:
             self.join_map[connection] += (alias,)
@@ -988,6 +991,8 @@ class Query(object):
         """
         opts = model._meta
         field_list = aggregate.lookup.split(LOOKUP_SEP)
+        is_derived = False
+
         if len(field_list) == 1 and self._aggregates and aggregate.lookup in self.aggregates:
             # Aggregate is over an annotation
             field_name = field_list[0]
@@ -1010,29 +1015,22 @@ class Query(object):
             # Join promotion note - we must not remove any rows here, so use
             # outer join if there isn't any existing join.
 
-            field, sources, opts, join_list, path = self.setup_joins(
-                field_list, opts, self.get_initial_alias())
+            # If the aggregate requires distinct values, we need to treat it
+            # differently in order to avoid summation errors
+            if aggregate.get_query_class(self).join_distinct:
+                col, source, is_derived = self.setup_aggregate_for_distinct(
+                    aggregate, field_list, opts)
 
-            # If the aggregate requires distinct values, and we have more than
-            # one multijoin, we need to set up a derived join to avoid
-            # aggregation errors.
+            else:
+                field, sources, opts, join_list, path = self.setup_joins(
+                    field_list, opts, self.get_initial_alias())
 
-            # unique list of aliases that use multijoins
-            multijoins = set(a for a, j in self.alias_map.iteritems() if j.m2m)
+                # Process join chain to remove unneeded joins from the far end
+                targets, _, join_list = self.trim_joins(sources, join_list, path)
 
-            sql_class = getattr(self.aggregates_module, aggregate.name)
-            if len(multijoins) > 1 and sql_class.join_distinct:
-                msg = ("{0.name}({0.lookup}) requires distinct rows, and "
-                       "cannot be used on a queryset with more than "
-                       "one multi-join.")
-                raise ValueError(msg.format(aggregate))
-
-            # Process the join chain to see if it can be trimmed
-            targets, _, join_list = self.trim_joins(sources, join_list, path)
-
-            col = targets[0].column
-            source = sources[0]
-            col = (join_list[-1], col)
+                col = targets[0].column
+                source = sources[0]
+                col = (join_list[-1], col)
         else:
             # The simplest cases. No joins required -
             # just reference the provided column alias.
@@ -1043,7 +1041,55 @@ class Query(object):
         self.append_aggregate_mask([alias])
 
         # Add the aggregate to the query
-        aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
+        aggregate.add_to_query(self, alias, col=col, source=source,
+                               is_summary=is_summary, is_derived=is_derived)
+
+    def setup_aggregate_for_distinct(self, aggregate, field_list, opts):
+        """
+        If the aggregate requires distinct values (eg, Sum), and we have more
+        than one multijoin, we need to set up a derived join to avoid
+        aggregation errors.
+        """
+        # Clone the queryset so that we can test for unique multijoins later
+        cloned_q = self.clone()
+
+        # Split the field list on the first many-to-* field
+        names_distinct, names_m2n = self.partition_names(field_list, opts)
+
+        if names_distinct:
+            # Set up the joins that don't result in multiple values
+            field, sources, opts, join_list, path = self.setup_joins(
+                names_distinct, opts, self.get_initial_alias())
+
+            # Process join chain to remove unneeded joins from the far end
+            targets, _, join_list = self.trim_joins(sources, join_list, path)
+
+            col = targets[0].column
+            source = sources[0]
+            col = (join_list[-1], col)
+
+        if not names_m2n:
+            # No m2n joins are used in this lookup
+            return source, col
+
+        # Find out if the remaining multijoin is unique by attempting a join on
+        # a cloned version of the queryset so as not to modify it
+        inf = cloned_q.setup_joins(field_list, opts, self.get_initial_alias())
+        cloned_q.trim_joins(inf[1], inf[3], inf[4])
+
+        # If the cloned query doesn't have more than one multijoin, the
+        # aggregate is using the existing multijoin and doesn't need to use
+        # a derived subquery.
+        if len([j for j in cloned_q.alias_map.values() if j.m2n]) <= 1:
+            return source, col
+
+        # Put the remaining query into a subquery
+        partial_path = []
+        if names_distinct:
+            partial_path = self.names_to_path(names_distinct, opts)
+        full_path = self.names_to_path(field_list, opts)
+        subq_path = full_path[len(partial_path):]
+        import ipdb; ipdb.set_trace()
 
     def prepare_lookup_value(self, value, lookups, can_reuse):
         # Default lookup if none given is exact.
@@ -1376,7 +1422,7 @@ class Query(object):
                 pathinfos = field.get_path_info()
                 if not allow_many:
                     for inner_pos, p in enumerate(pathinfos):
-                        if p.m2m:
+                        if p.m2n:
                             cur_names_with_path[1].extend(pathinfos[0:inner_pos + 1])
                             names_with_path.append(cur_names_with_path)
                             raise MultiJoin(pos + 1, names_with_path)
@@ -1441,15 +1487,18 @@ class Query(object):
             else:
                 nullable = True
             connection = alias, opts.db_table, join.join_field.get_joining_columns()
-            reuse = can_reuse if join.m2m else None
+            reuse = can_reuse if join.m2n else None
             alias = self.join(
                 connection, reuse=reuse, nullable=nullable,
-                join_field=join.join_field, m2m=join.m2m)
+                join_field=join.join_field, m2n=join.m2n)
             joins.append(alias)
         return final_field, targets, opts, joins, path
 
     def trim_joins(self, targets, joins, path):
         """
+        Processes a join chain to see if we can remove unneeded joins from
+        the far end (fewer tables in a query is better).
+
         The 'target' parameter is the final field being joined to, 'joins'
         is the full list of join aliases. The 'path' contain the PathInfos
         used to create the joins.
@@ -1538,6 +1587,18 @@ class Query(object):
             # outercol IS NULL we will not match the row.
         return condition, needed_inner
 
+    def partition_names(self, join_list, opts):
+        """
+        Splits the given field list on the first many-to-* relationship,
+        returning all
+        """
+        path = self.names_to_path(join_list, opts)[0]
+        try:
+            idx = next(i for i, p in enumerate(path) if p.m2n)
+            return join_list[:idx], join_list[idx:]
+        except StopIteration:
+            return join_list[:], []
+
     def set_empty(self):
         self.where = EmptyWhere()
         self.having = EmptyWhere()
@@ -1605,7 +1666,7 @@ class Query(object):
         self.distinct_fields = field_names
         self.distinct = True
 
-    def add_fields(self, field_names, allow_m2m=True):
+    def add_fields(self, field_names, allow_m2n=True):
         """
         Adds the given (model) fields to the select set. The field names are
         added in the order specified.
@@ -1619,7 +1680,7 @@ class Query(object):
                 # if there is no existing joins, use outer join.
                 field, targets, u2, joins, path = self.setup_joins(
                     name.split(LOOKUP_SEP), opts, alias, can_reuse=None,
-                    allow_many=allow_m2m)
+                    allow_many=allow_m2n)
                 targets, final_alias, joins = self.trim_joins(targets, joins, path)
                 for target in targets:
                     self.select.append(SelectInfo((final_alias, target.column), target))
@@ -1917,7 +1978,7 @@ class Query(object):
             all_paths.extend(paths)
         contains_louter = False
         for pos, path in enumerate(all_paths):
-            if path.m2m:
+            if path.m2n:
                 break
             if self.alias_map[self.tables[pos + 1]].join_type == self.LOUTER:
                 contains_louter = True

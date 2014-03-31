@@ -17,8 +17,9 @@ def refs_aggregate(lookup_parts, aggregates):
     """
     for n in range(len(lookup_parts) + 1):
         level_n_lookup = LOOKUP_SEP.join(lookup_parts[0:n])
-        if level_n_lookup in aggregates:
-            return aggregates[level_n_lookup], lookup_parts[n:]
+        aggregate = aggregates.get(level_n_lookup)
+        if aggregate and not aggregate.is_derived:
+            return aggregate, lookup_parts[n:]
     return False, ()
 
 
@@ -43,7 +44,10 @@ class Aggregate(object):
         return '%s__%s' % (self.lookup, self.name.lower())
     default_alias = property(_default_alias)
 
-    def add_to_query(self, query, alias, col, source, is_summary):
+    def get_query_class(self, query):
+        return getattr(query.aggregates_module, self.name)
+
+    def add_to_query(self, query, alias, col, source, is_summary, is_derived):
         """Add the aggregate to the nominated query.
 
         This method is used to convert the generic Aggregate definition into a
@@ -60,9 +64,13 @@ class Aggregate(object):
            output type of the aggregate.
          * is_summary is a boolean that is set True if the aggregate is a
            summary value rather than an annotation.
+         * is_derived is a boolean indicating whether or not the aggregate is
+           calculated in a derived subquery. In this case the aggregate should
+           be treated as a normal field.
         """
-        klass = getattr(query.aggregates_module, self.name)
-        aggregate = klass(col, source=source, is_summary=is_summary, **self.extra)
+        klass = self.get_query_class(query)
+        aggregate = klass(col, source=source, is_summary=is_summary,
+                          is_derived=is_derived, **self.extra)
         query.aggregates[alias] = aggregate
 
 

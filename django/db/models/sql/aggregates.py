@@ -20,7 +20,8 @@ class Aggregate(RegisterLookupMixin):
     join_distinct = False
     sql_template = '%(function)s(%(field)s)'
 
-    def __init__(self, col, source=None, is_summary=False, **extra):
+    def __init__(self, col, source=None, is_summary=False, is_derived=False,
+                 **extra):
         """Instantiate an SQL aggregate
 
          * col is a column reference describing the subject field
@@ -51,6 +52,7 @@ class Aggregate(RegisterLookupMixin):
         self.col = col
         self.source = source
         self.is_summary = is_summary
+        self.is_derived = is_derived
         self.extra = extra
 
         # Follow the chain of aggregate sources back until you find an

@@ -291,6 +291,7 @@ class StateTests(TestCase):
         ))
         self.assertNotEqual(project_state, other_state)
         self.assertEqual(project_state == other_state, False)
+<<<<<<< HEAD
 
     def test_dangling_references_throw_error(self):
         new_apps = Apps()
@@ -335,3 +336,5 @@ class StateTests(TestCase):
         project_state.add_model_state(ModelState.from_model(Magazine))
         with self.assertRaises(ValueError):
             rendered_state = project_state.render()
+=======
+>>>>>>> parent of 956bd64... Fixed #22397 -- Issues removing M2M field with explicit through model

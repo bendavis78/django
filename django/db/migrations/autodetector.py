@@ -160,7 +160,7 @@ class MigrationAutodetector(object):
                     ),
                     # If it's already been added in phase 2 put it in a new
                     # migration for safety.
-                    new=any((al, mn) in added_phase_2 for f, al, mn in related_fields),
+                    #new=any((al, mn) in added_phase_2 for f, al, mn in related_fields),
                 )
                 added_phase_2.add((app_label, model_name))
             # Ah well, we'll need to split one. Pick deterministically.

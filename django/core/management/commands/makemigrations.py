@@ -23,6 +23,9 @@ class Command(BaseCommand):
             help="Enable fixing of migration conflicts."),
         make_option('--empty', action='store_true', dest='empty', default=False,
             help="Create an empty migration."),
+        make_option('--force-single', action='store_true', dest='force_single',
+                    default=False,
+                    help="Hack to prevent unecessary extra migrations")
     )
 
     help = "Creates new migration(s) for apps."
@@ -35,6 +38,7 @@ class Command(BaseCommand):
         self.dry_run = options.get('dry_run', False)
         self.merge = options.get('merge', False)
         self.empty = options.get('empty', False)
+        self.force_single = options.get('force_single', False)
 
         # Make sure the app they asked for exists
         app_labels = set(app_labels)
@@ -94,7 +98,9 @@ class Command(BaseCommand):
             return
 
         # Detect changes
-        changes = autodetector.changes(graph=loader.graph, trim_to_apps=app_labels or None)
+        changes = autodetector.changes(graph=loader.graph,
+                                       trim_to_apps=app_labels or None,
+                                       force_single=self.force_single)
 
         # No changes? Tell them.
         if not changes and self.verbosity >= 1:

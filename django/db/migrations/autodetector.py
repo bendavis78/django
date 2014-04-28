@@ -24,19 +24,19 @@ class MigrationAutodetector(object):
         self.to_state = to_state
         self.questioner = questioner or MigrationQuestioner()
 
-    def changes(self, graph, trim_to_apps=None):
+    def changes(self, graph, trim_to_apps=None, force_single=False):
         """
         Main entry point to produce a list of appliable changes.
         Takes a graph to base names on and an optional set of apps
         to try and restrict to (restriction is not guaranteed)
         """
-        changes = self._detect_changes()
+        changes = self._detect_changes(force_single=force_single)
         changes = self.arrange_for_graph(changes, graph)
         if trim_to_apps:
             changes = self._trim_to_apps(changes, trim_to_apps)
         return changes
 
-    def _detect_changes(self):
+    def _detect_changes(self, force_single=False):
         """
         Returns a dict of migration plans which will achieve the
         change from from_state to to_state. The dict has app labels
@@ -150,6 +150,9 @@ class MigrationAutodetector(object):
             if satisfied:
                 (app_label, model_name), related_fields = sorted(satisfied)[0]
                 model_state = self.to_state.models[app_label, model_name]
+                # If it's already been added in phase 2 put it in a new
+                # migration for safety.
+                new = not force_single and any((al, mn) in added_phase_2 for f, al, mn in related_fields)
                 self.add_to_migration(
                     app_label,
                     operations.CreateModel(
@@ -158,9 +161,7 @@ class MigrationAutodetector(object):
                         options=model_state.options,
                         bases=model_state.bases,
                     ),
-                    # If it's already been added in phase 2 put it in a new
-                    # migration for safety.
-                    new=any((al, mn) in added_phase_2 for f, al, mn in related_fields),
+                    new=new,
                 )
                 added_phase_2.add((app_label, model_name))
             # Ah well, we'll need to split one. Pick deterministically.

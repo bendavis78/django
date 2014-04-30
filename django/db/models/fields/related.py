@@ -117,6 +117,8 @@ class RelatedField(Field):
         return []
 
     def _check_referencing_to_swapped_model(self):
+        if not self.swappable_setting:
+            return []
         if (self.rel.to not in apps.get_models() and
                 not isinstance(self.rel.to, six.string_types) and
                 self.rel.to._meta.swapped):
@@ -269,6 +271,26 @@ class RelatedField(Field):
             add_lazy_relation(cls, self, other, resolve_related_class)
         else:
             self.do_related_class(other, cls)
+
+    @property
+    def swappable(self):
+        """
+        Boolean indicating whether or not this field should point to the
+        swapped model if that model is swappable.
+        """
+        # If the "to" model is a string that points to a swappable model, then
+        # by default it will always point to the swapped model. If the "to"
+        # model is a reference to the model class itself, it is assumed that it
+        # should not point to the swapped model. This behavior can be
+        # explicitly controlled during initialization by passing
+        # ``swappable=False`` to never reference a swapped model, or
+        # ``swappable=True`` to always reference a swapped model.
+        if self._swappable is not None:
+            return self._swappable
+        if isinstance(self.rel.to, six.string_types):
+            to_model = apps.get_model(self.rel.to)
+            return bool(to_model._meta.swappable)
+        return False
 
     @property
     def swappable_setting(self):
@@ -1302,10 +1324,10 @@ class ForeignObject(RelatedField):
     generate_reverse_relation = True
     related_accessor_class = ForeignRelatedObjectsDescriptor
 
-    def __init__(self, to, from_fields, to_fields, swappable=True, **kwargs):
+    def __init__(self, to, from_fields, to_fields, swappable=None, **kwargs):
         self.from_fields = from_fields
         self.to_fields = to_fields
-        self.swappable = swappable
+        self._swappable = swappable
 
         if 'rel' not in kwargs:
             kwargs['rel'] = ForeignObjectRel(
@@ -1854,7 +1876,7 @@ def create_many_to_many_intermediary_model(field, klass):
 class ManyToManyField(RelatedField):
     description = _("Many-to-many relationship")
 
-    def __init__(self, to, db_constraint=True, swappable=True, **kwargs):
+    def __init__(self, to, db_constraint=True, swappable=None, **kwargs):
         try:
             to._meta
         except AttributeError:  # to._meta doesn't exist, so it must be RECURSIVE_RELATIONSHIP_CONSTANT
@@ -1873,7 +1895,7 @@ class ManyToManyField(RelatedField):
             db_constraint=db_constraint,
         )
 
-        self.swappable = swappable
+        self._swappable = swappable
         self.db_table = kwargs.pop('db_table', None)
         if kwargs['rel'].through is not None:
             assert self.db_table is None, "Cannot specify a db_table if an intermediary model is used."

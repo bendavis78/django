@@ -157,7 +157,9 @@ def password_reset(request, is_admin_site=False,
                 'subject_template_name': subject_template_name,
                 'request': request,
                 'html_email_template_name': html_email_template_name,
+                'current_app': current_app
             }
+
             if is_admin_site:
                 opts = dict(opts, domain_override=request.get_host())
             form.save(**opts)

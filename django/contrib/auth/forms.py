@@ -4,7 +4,7 @@ from collections import OrderedDict
 
 from django import forms
 from django.forms.utils import flatatt
-from django.template import loader
+from django.template import loader, Context
 from django.utils.encoding import force_bytes
 from django.utils.html import format_html, format_html_join
 from django.utils.http import urlsafe_base64_encode
@@ -234,7 +234,8 @@ class PasswordResetForm(forms.Form):
              subject_template_name='registration/password_reset_subject.txt',
              email_template_name='registration/password_reset_email.html',
              use_https=False, token_generator=default_token_generator,
-             from_email=None, request=None, html_email_template_name=None):
+             from_email=None, request=None, html_email_template_name=None,
+             current_app=None):
         """
         Generates a one-use only link for resetting password and sends to the
         user.
@@ -264,13 +265,17 @@ class PasswordResetForm(forms.Form):
                 'token': token_generator.make_token(user),
                 'protocol': 'https' if use_https else 'http',
             }
-            subject = loader.render_to_string(subject_template_name, c)
+            context_instance = Context(current_app=current_app)
+            subject = loader.render_to_string(
+                subject_template_name, c, context_instance)
             # Email subject *must not* contain newlines
             subject = ''.join(subject.splitlines())
-            email = loader.render_to_string(email_template_name, c)
+            email = loader.render_to_string(
+                email_template_name, c, context_instance)
 
             if html_email_template_name:
-                html_email = loader.render_to_string(html_email_template_name, c)
+                html_email = loader.render_to_string(
+                    html_email_template_name, c, context_instance)
             else:
                 html_email = None
             send_mail(subject, email, from_email, [user.email], html_message=html_email)

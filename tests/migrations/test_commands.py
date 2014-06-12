@@ -469,3 +469,22 @@ class MakeMigrationsTests(MigrationTestBase):
         self.assertTrue(os.path.isfile(os.path.join(self.test_dir,
                        "test_migrations_path_doesnt_exist", "foo", "bar",
                        "0001_initial.py")))
+
+    @override_system_checks([])
+    @override_settings(INSTALLED_APPS=[
+        "migrations.migrations_test_apps.regression_22824.unmigrated_a",
+        "migrations.migrations_test_apps.regression_22824.unmigrated_b",
+        "migrations.migrations_test_apps.regression_22824.unmigrated_c"])
+    def test_regression_22824(self):
+        """
+        Starting out with no migrations
+
+        * You have app `A`, `B`, and `C`.
+        * Model in app `B` has a foreign key to app `C`.
+        * Make migrations for `A` - works
+        * Then make migrations for `B` - doesn't work
+        """
+        stdout = six.StringIO()
+        call_command("makemigrations", "unmigrated_a", stdout=stdout)
+        call_command("makemigrations", "unmigrated_b", stdout=stdout)
+        call_command("makemigrations", "unmigrated_c", stdout=stdout)

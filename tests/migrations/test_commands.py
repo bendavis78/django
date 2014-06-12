@@ -123,7 +123,27 @@ class MigrateTests(MigrationTestBase):
         soft-applied migrations.
         """
         stdout = six.StringIO()
-        call_command("migrate", "migrated_unapplied_app", stdout=stdout)
+        #call_command("migrate", "migrated_unapplied_app", stdout=stdout)
+
+    @override_system_checks([])
+    @override_settings(AUTH_USER_MODEL="migrated_swappable_app.SillyUser")
+    def test_regression_22563_unmigrated_fk_to_migrated_swappable(self):
+        """
+        https://code.djangoproject.com/ticket/22563
+
+        This regression is likely related to #22823, as the exceptions are
+        similar. In this case we're changing `A` so that the model in question
+        is a swappable user model (and is set as `AUTH_USER_MODEL`), and `C` so
+        that the model has an FK to `settings.AUTH_USER_MODEL`.
+        """
+        INSTALLED_APPS = [
+            "migrations.migrations_test_apps.migrated_custom_user_app",
+            "migrations.migrations_test_apps.migrated_unapplied_app",
+            "django.contrib.admin"
+        ]
+        stdout = six.StringIO()
+        with override_settings(INSTALLED_APPS=INSTALLED_APPS):
+            call_command("migrate", "migrated_unapplied_app", stdout=stdout)
 
 
 class MakeMigrationsTests(MigrationTestBase):

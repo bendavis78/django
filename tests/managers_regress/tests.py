@@ -201,3 +201,8 @@ class ManagersRegressionTests(TestCase):
             t.render(Context({'related': related})),
             ''.join([force_text(relation.pk)] * 3),
         )
+
+    def test_generic_relation_property_str(self):
+        obj = RelatedModel.objects.create()
+        self.assertEqual(
+            force_text(obj.test_gfk), 'managers_regress.RelatedModel.test_gfk')
